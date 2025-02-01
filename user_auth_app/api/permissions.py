@@ -1,7 +1,6 @@
-from rest_framework.permissions import BasePermission, SAFE_METHODS
+from rest_framework.permissions import BasePermission
 
 
-class isStaffOrReadOnly(BasePermission):
-    def has_permission(self, request, view):
-        is_staff = bool(request.user and request.user.is_staff)
-        return is_staff or request.method in SAFE_METHODS
+class IsOwnerOrAdmin(BasePermission):
+    def has_object_permission(self, request, view, obj):
+        return request.user == obj.user or request.user.is_staff
