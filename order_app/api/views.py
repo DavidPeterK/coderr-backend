@@ -1,69 +1,90 @@
-from rest_framework import generics, status
+from rest_framework import generics, permissions, filters
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, IsAdminUser
-from base_info_app.api import serializers
-from order_app import models
+from django_filters import rest_framework as django_filters
 from order_app.models import Order
-from .serializers import OrderSerializer, OrderCreateSerializer
-from django.db.models import Q
+from user_auth_app.models import CustomUser
+from .serializers import OrderSerializer
+from rest_framework.views import APIView
 
 
-class OrderListView(generics.ListAPIView):
+class OrderFilter(django_filters.FilterSet):
+    customer = django_filters.NumberFilter()
+    business = django_filters.NumberFilter()
+    status = django_filters.ChoiceFilter(choices=Order.STATUS_CHOICES)
+
+    class Meta:
+        model = Order
+        fields = ['customer', 'business', 'status']
+
+
+class OrderListCreateView(generics.ListCreateAPIView):
     serializer_class = OrderSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [
+        django_filters.DjangoFilterBackend, filters.OrderingFilter]
+    filterset_class = OrderFilter
+    ordering_fields = ['created_at', 'updated_at']
 
     def get_queryset(self):
         user = self.request.user
-        return Order.objects.filter(
-            models.Q(customer_user=user) | models.Q(business_user=user)
-        )
-
-
-class OrderCreateView(generics.CreateAPIView):
-    serializer_class = OrderCreateSerializer
-    permission_classes = [IsAuthenticated]
+        if user.type == 'customer':
+            return Order.objects.filter(customer_id=user.id).order_by('-created_at')
+        elif user.type == 'business':
+            return Order.objects.filter(business_id=user.id).order_by('-created_at')
+        return Order.objects.none()
 
     def perform_create(self, serializer):
-        if self.request.user.type != 'customer':
-            raise serializers.ValidationError(
-                "Only customers can create orders.")
-        serializer.save()
+        serializer.save(customer=self.request.user)
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
 
 
-class OrderDetailView(generics.RetrieveAPIView):
+class OrderDetailView(generics.RetrieveUpdateAPIView):
     serializer_class = OrderSerializer
-    queryset = Order.objects.all()
-    permission_classes = [IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated]
 
+    def get_queryset(self):
+        user = self.request.user
+        if user.type == 'customer':  # String-Vergleich statt Join
+            return Order.objects.filter(customer_id=user.id)
+        elif user.type == 'business':  # String-Vergleich statt Join
+            return Order.objects.filter(business_id=user.id)
+        return Order.objects.none()
 
-class OrderUpdateView(generics.UpdateAPIView):
-    serializer_class = OrderSerializer
-    queryset = Order.objects.all()
-    permission_classes = [IsAuthenticated]
-
-    def partial_update(self, request, *args, **kwargs):
-        instance = self.get_object()
-        if 'status' in request.data:
-            instance.status = request.data['status']
-            instance.save()
-        return Response(self.get_serializer(instance).data)
+    def check_object_permissions(self, request, obj):
+        user = request.user
+        if request.method in ['PUT', 'PATCH']:
+            if user.type == 'business' and obj.business_id != user.id:  # ID-Vergleich statt Join
+                self.permission_denied(request)
+            elif user.type == 'customer' and obj.customer_id != user.id:  # ID-Vergleich statt Join
+                self.permission_denied(request)
+        return super().check_object_permissions(request, obj)
 
 
 class OrderDeleteView(generics.DestroyAPIView):
     serializer_class = OrderSerializer
     queryset = Order.objects.all()
-    permission_classes = [IsAdminUser]
+    permission_classes = [permissions.IsAdminUser]
 
 
-class OrderCountView(generics.GenericAPIView):
-    def get(self, request, business_user_id, *args, **kwargs):
+class OrderCountView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, business_user_id):
         count = Order.objects.filter(
-            business_user_id=business_user_id, status='in_progress').count()
-        return Response({"order_count": count})
+            business_id=business_user_id).count()  # ID-Filter statt Join
+        return Response({'count': count})
 
 
-class CompletedOrderCountView(generics.GenericAPIView):
-    def get(self, request, business_user_id, *args, **kwargs):
+class CompletedOrderCountView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, business_user_id):
         count = Order.objects.filter(
-            business_user_id=business_user_id, status='completed').count()
-        return Response({"completed_order_count": count})
+            business_id=business_user_id,  # ID-Filter statt Join
+            status='completed'
+        ).count()
+        return Response({'count': count})

@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     'offer_app',
     'order_app',
     'base_info_app',
+    'django_filters',
 ]
 
 AUTH_USER_MODEL = 'user_auth_app.CustomUser'

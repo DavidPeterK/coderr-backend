@@ -1,5 +1,7 @@
 from rest_framework import serializers
 from offer_app.models import Offer, OfferDetail
+from user_auth_app.api.serializers import UserBasicSerializer
+from user_auth_app.models import CustomUser
 
 
 class OfferDetailSerializer(serializers.ModelSerializer):
@@ -10,12 +12,29 @@ class OfferDetailSerializer(serializers.ModelSerializer):
 
 
 class OfferSerializer(serializers.ModelSerializer):
-    details = OfferDetailSerializer(many=True)
+    user = UserBasicSerializer(read_only=True)
+    details = OfferDetailSerializer(many=True, read_only=True)
 
     class Meta:
         model = Offer
-        fields = ['id', 'user', 'title', 'image', 'description',
+        fields = ['id', 'user', 'review_count', 'average_rating', 'title', 'image', 'description',
                   'created_at', 'updated_at', 'details']
+        read_only_fields = ['user', 'review_count',
+                            'average_rating', 'created_at', 'updated_at']
+
+    def validate(self, data):
+        if self.context['request'].user.type != 'business':
+            raise serializers.ValidationError(
+                'Nur Business-User können Angebote erstellen')
+        return data
+
+    def create(self, validated_data):
+        user = self.context['request'].user
+        if user.type != 'business':
+            raise serializers.ValidationError(
+                'Nur Business-User können Angebote erstellen')
+        validated_data['user'] = user
+        return super().create(validated_data)
 
     def validate_details(self, value):
         if len(value) != 3:
@@ -26,13 +45,6 @@ class OfferSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 "Angebotsdetails müssen die Typen basic, standard und premium enthalten.")
         return value
-
-    def create(self, validated_data):
-        details_data = validated_data.pop('details')
-        offer = Offer.objects.create(**validated_data)
-        for detail_data in details_data:
-            OfferDetail.objects.create(offer=offer, **detail_data)
-        return offer
 
     def update(self, instance, validated_data):
         details_data = validated_data.pop('details', None)

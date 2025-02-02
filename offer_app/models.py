@@ -1,15 +1,15 @@
 from django.db import models
 from django.conf import settings
+from user_auth_app.models import CustomUser
 
 
 class Offer(models.Model):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name="offers"
+        related_name="offers",
     )
-    review_count = models.PositiveIntegerField(
-        default=0)
+    review_count = models.PositiveIntegerField(default=0)
     average_rating = models.DecimalField(
         max_digits=3, decimal_places=1, default=0.0)
     title = models.CharField(max_length=255)
@@ -20,6 +20,12 @@ class Offer(models.Model):
 
     def __str__(self):
         return self.title
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if hasattr(self, 'user') and self.user.type != 'business':
+            raise ValidationError(
+                'Nur Business-User können Angebote erstellen')
 
 
 class OfferDetail(models.Model):
